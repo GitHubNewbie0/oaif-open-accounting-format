@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#2563eb;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#7c3aed;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Background circle -->
+  <circle cx="100" cy="100" r="95" fill="url(#bg)" />
+  
+  <!-- Inner ring -->
+  <circle cx="100" cy="100" r="75" fill="none" stroke="white" stroke-width="3" opacity="0.3" />
+  
+  <!-- Arrows forming circular flow (representing interchange) -->
+  <g fill="white">
+    <!-- Top arrow -->
+    <path d="M100 25 L115 50 L105 50 L105 70 L95 70 L95 50 L85 50 Z" transform="rotate(0 100 100)"/>
+    <!-- Right arrow -->
+    <path d="M100 25 L115 50 L105 50 L105 70 L95 70 L95 50 L85 50 Z" transform="rotate(90 100 100)"/>
+    <!-- Bottom arrow -->
+    <path d="M100 25 L115 50 L105 50 L105 70 L95 70 L95 50 L85 50 Z" transform="rotate(180 100 100)"/>
+    <!-- Left arrow -->
+    <path d="M100 25 L115 50 L105 50 L105 70 L95 70 L95 50 L85 50 Z" transform="rotate(270 100 100)"/>
+  </g>
+  
+  <!-- Center circle with document icon -->
+  <circle cx="100" cy="100" r="35" fill="white"/>
+  
+  <!-- Document/database icon in center -->
+  <g transform="translate(80, 82)">
+    <!-- Database cylinder shape -->
+    <ellipse cx="20" cy="5" rx="15" ry="5" fill="#2563eb"/>
+    <rect x="5" y="5" width="30" height="25" fill="#2563eb"/>
+    <ellipse cx="20" cy="30" rx="15" ry="5" fill="#2563eb"/>
+    <!-- Horizontal lines representing data rows -->
+    <line x1="8" y1="12" x2="32" y2="12" stroke="white" stroke-width="2"/>
+    <line x1="8" y1="19" x2="32" y2="19" stroke="white" stroke-width="2"/>
+    <line x1="8" y1="26" x2="32" y2="26" stroke="white" stroke-width="2"/>
+  </g>
+</svg>
