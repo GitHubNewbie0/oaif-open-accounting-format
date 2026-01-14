@@ -234,7 +234,6 @@ The complete specification is available in [`docs/SPECIFICATION.md`](docs/SPECIF
 | Tool | Description | Status |
 |------|-------------|--------|
 | `qb2oaif` | QuickBooks Desktop → OAIF | ✅ Available |
-| `oaif2manager` | OAIF → Manager.io | ✅ Available |
 | `oaif-validate` | Validate OAIF files | 🚧 Coming Soon |
 | `oaif-diff` | Compare two OAIF files | 🚧 Coming Soon |
 
