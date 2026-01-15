@@ -312,7 +312,53 @@ CREATE TABLE [name]_type (
 | `BILLABLE_TIME` | Time entry for billing |
 | `BILLABLE_EXPENSE` | Expense for rebilling |
 
-### 3.3 Item Types
+## 3.3 Attachments
+
+OAIF v1.1 adds support for document attachments linked to transactions.
+
+### Purpose
+
+Store receipts, contracts, and supporting documents directly in the OAIF file. This ensures complete data portability - when migrating between accounting systems, users keep their supporting documentation.
+
+### Schema
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| attachment_id | INTEGER | Auto | Primary key |
+| txn_id | INTEGER | No | Link to transaction (NULL for standalone) |
+| filename | TEXT | **Yes** | Original filename with extension |
+| mime_type | TEXT | No | MIME type (e.g., 'application/pdf') |
+| file_size | INTEGER | No | Size in bytes |
+| file_data | BLOB | * | Binary file data (embedded) |
+| external_path | TEXT | * | Local filesystem path |
+| external_url | TEXT | * | Cloud storage URL |
+| checksum | TEXT | No | SHA-256 hash for verification |
+| description | TEXT | No | User-provided description |
+| document_date | TEXT | No | Document date (may differ from upload) |
+| uploaded_at | TEXT | Auto | When attachment was added |
+| source_id | TEXT | No | ID from source system |
+| source_system | TEXT | No | Name of source system |
+| source_raw | TEXT | No | Original metadata as JSON |
+
+\* One of file_data, external_path, or external_url should be populated.
+
+### Storage Modes
+
+| Mode | Field | Portable? | Use Case |
+|------|-------|-----------|----------|
+| **Embedded** | file_data | ✅ Yes | Default - complete portability |
+| **Local** | external_path | ❌ No | Large files, temporary |
+| **Cloud** | external_url | ⚠️ Depends | Cloud-native systems |
+
+**Recommendation:** Embedded storage is strongly preferred for interchange.
+
+### Size Guidelines
+
+- Individual file: 10 MB recommended max
+- Total per transaction: 25 MB recommended max
+- Warning threshold: 500 MB total OAIF file size
+
+### 3.4 Item Types
 
 | Name | Description |
 |------|-------------|
@@ -330,7 +376,7 @@ CREATE TABLE [name]_type (
 | `SALES_TAX` | Tax line item |
 | `SALES_TAX_GROUP` | Combined tax |
 
-### 3.4 Entity Types
+### 3.5 Entity Types
 
 | Name | Description |
 |------|-------------|
@@ -339,7 +385,7 @@ CREATE TABLE [name]_type (
 | `EMPLOYEE` | Worker |
 | `OTHER` | Other party |
 
-### 3.5 Tax Types
+### 3.6 Tax Types
 
 | Name | Description |
 |------|-------------|
@@ -351,7 +397,7 @@ CREATE TABLE [name]_type (
 | `EXCISE` | Excise duty |
 | `EXEMPT` | Tax exempt |
 
-### 3.6 Security Types (Investments)
+### 3.7 Security Types (Investments)
 
 | Name | Description |
 |------|-------------|
@@ -366,7 +412,7 @@ CREATE TABLE [name]_type (
 | `COMMODITY` | Gold, oil, etc. |
 | `OTHER_SECURITY` | Other investment |
 
-### 3.7 Dimension Types (Classifications)
+### 3.8 Dimension Types (Classifications)
 
 | Name | QB | Manager | Sage | Description |
 |------|----|---------|----- |-------------|
