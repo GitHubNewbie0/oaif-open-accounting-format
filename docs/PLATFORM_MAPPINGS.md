@@ -436,6 +436,28 @@ WHERE tl.txn_header_id NOT IN (SELECT id FROM txn_header);
 
 See `oaif_schema.sql` for complete INSERT statements for all reference tables.
 
+## Attachment Mappings
+
+| Platform | Source | Notes |
+|----------|--------|-------|
+| QuickBooks Desktop | AttachableRef | Download via SDK |
+| QuickBooks Online | Attachable API | Binary available via API |
+| Xero | Attachments endpoint | Per invoice/bill |
+| Manager.io | Attachments folder | External file references |
+| FreshBooks | Invoice attachments | Via API |
+| Sage Intacct | Supdoc | Document management system |
+| Zoho Books | Documents section | Per transaction |
+| Wave | Receipt scanning | Via mobile app |
+| GnuCash | N/A | No native attachment support |
+| Quicken | N/A | No native attachment support |
+
+### Converter Guidelines
+
+1. **Prefer embedded storage** - Download binary data when possible
+2. **Fall back gracefully** - Use external_url if binary unavailable  
+3. **Preserve source data** - Always populate source_id, source_system, source_raw
+4. **Verify integrity** - Generate checksum for external references
+
 ---
 
 *End of Platform Mapping Document*
