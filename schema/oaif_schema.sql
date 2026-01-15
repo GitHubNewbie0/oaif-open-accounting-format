@@ -1151,5 +1151,63 @@ WHERE il.shares_remaining > 0
 GROUP BY a.id, a.name, s.symbol, s.name, st.name, s.last_price;
 
 -- ============================================================================
+-- ATTACHMENT TABLE (OAIF v1.1)
+-- ============================================================================
+-- Stores document attachments (receipts, contracts, supporting docs) linked
+-- to transactions. Enables complete data portability during system migration.
+
+CREATE TABLE attachment (
+    attachment_id INTEGER PRIMARY KEY,
+    
+    -- Link to transaction (optional - could be standalone document)
+    txn_id INTEGER REFERENCES txn_header(txn_id) ON DELETE SET NULL,
+    
+    -- File identification
+    filename TEXT NOT NULL,              -- Original filename
+    mime_type TEXT,                       -- e.g., 'application/pdf', 'image/jpeg'
+    file_size INTEGER,                    -- Size in bytes
+    
+    -- Storage (ONE of these should be populated)
+    file_data BLOB,                       -- Embedded binary data (most portable)
+    external_path TEXT,                   -- Local filesystem path reference
+    external_url TEXT,                    -- Cloud storage URL reference
+    checksum TEXT,                        -- SHA-256 hash for integrity verification
+    
+    -- Metadata
+    description TEXT,                     -- User-provided description
+    document_date TEXT,                   -- Date of the document (may differ from upload)
+    uploaded_at TEXT DEFAULT (datetime('now')),
+    
+    -- Source tracking for imports
+    source_id TEXT,                       -- ID from source system
+    source_system TEXT,                   -- e.g., 'quickbooks', 'xero'
+    source_raw TEXT                       -- Original metadata as JSON
+);
+
+CREATE INDEX idx_attachment_txn ON attachment(txn_id);
+CREATE INDEX idx_attachment_date ON attachment(document_date);
+
+-- Validation view: find attachments with storage issues
+CREATE VIEW v_attachment_issues AS
+SELECT 
+    attachment_id,
+    filename,
+    txn_id,
+    CASE
+        WHEN file_data IS NULL AND external_path IS NULL AND external_url IS NULL 
+            THEN 'No storage location'
+        WHEN (file_data IS NOT NULL AND external_path IS NOT NULL)
+            OR (file_data IS NOT NULL AND external_url IS NOT NULL)
+            OR (external_path IS NOT NULL AND external_url IS NOT NULL)
+            THEN 'Multiple storage locations'
+        ELSE 'OK'
+    END as issue
+FROM attachment
+WHERE (file_data IS NULL AND external_path IS NULL AND external_url IS NULL)
+   OR (file_data IS NOT NULL AND external_path IS NOT NULL)
+   OR (file_data IS NOT NULL AND external_url IS NOT NULL)
+   OR (external_path IS NOT NULL AND external_url IS NOT NULL);
+
+-- ============================================================================
 -- END OF SCHEMA
 -- ============================================================================
