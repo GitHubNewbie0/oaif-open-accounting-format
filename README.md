@@ -40,6 +40,7 @@ company_2026.oaif  ←  One file contains EVERYTHING
 ├── Employees
 ├── Products & Services
 ├── All Transactions (with full audit trail)
+├── Attachments (receipts, documents)    ← NEW v1.1
 ├── Investments & Securities
 ├── Payroll Data
 └── Custom Fields & Extensions
@@ -198,6 +199,8 @@ OAIF File
 │   ├── txn_header         # Transaction headers
 │   ├── txn_line           # Line items (splits)
 │   └── txn_link           # Related transactions
+├── Attachments
+│   └── attachment         # Document attachments (v1.1)
 └── Extensions
     └── extension_data     # Custom fields
 ```
@@ -311,8 +314,9 @@ We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## Roadmap
 
-### v1.0 (Current)
-- ✅ Complete specification
+### v1.1 (Current)
+v1.0 * ✅ Complete specification
+* ✅ Attachment support for document storage
 - ✅ SQL schema with standard types
 - ✅ Platform mappings for 11 systems
 - ✅ Reference tools (qb2oaif, oaif2manager)
