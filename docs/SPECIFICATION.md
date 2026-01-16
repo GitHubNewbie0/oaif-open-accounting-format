@@ -2,7 +2,7 @@
 
 ## Universal Accounting Data Exchange Standard
 
-**Version:** 1.0  
+**Version:** 1.2  
 **Date:** January 2026  
 **Status:** Draft Specification  
 
@@ -100,6 +100,42 @@ CREATE TABLE transaction_type (
 - New types can be added without breaking existing files
 - Readers look up types from embedded tables, never hardcode
 
+**CRITICAL - ID Independence:**
+
+The INSERT statements in this specification provide **reference ID assignments** for interoperability between converters. However:
+
+- **Readers MUST NOT assume specific ID-to-name mappings.** A file where INVOICE has id=3 and another where INVOICE has id=99 are both valid.
+- **Readers MUST look up type names from the embedded reference tables in each file.** Never hardcode "id 3 means INVOICE".
+- **Writers SHOULD use the reference IDs** from this specification for consistency between tools, but this is not required.
+- **The NAME field is the only interoperable identifier.** IDs are file-local conveniences for foreign key joins.
+
+**Correct pattern for readers:**
+
+```python
+# Build type lookup from THIS file's embedded table
+txn_types = {}
+for row in conn.execute('SELECT id, name FROM transaction_type'):
+    txn_types[row[0]] = row[1]   # id -> name
+    txn_types[row[1]] = row[0]   # name -> id (for queries)
+
+# Now use names for logic
+invoice_type_id = txn_types.get('INVOICE')
+if invoice_type_id:
+    invoices = conn.execute(
+        'SELECT * FROM txn_header WHERE txn_type_id = ?', 
+        (invoice_type_id,)
+    ).fetchall()
+```
+
+**Incorrect pattern (DO NOT DO THIS):**
+
+```python
+# WRONG - hardcoded ID assumption
+invoices = conn.execute(
+    'SELECT * FROM txn_header WHERE txn_type_id = 3'  # Assumes INVOICE=3
+).fetchall()
+```
+
 ### 2.2 Namespace Convention
 
 | Pattern | Scope | Example |
@@ -107,6 +143,8 @@ CREATE TABLE transaction_type (
 | `UPPERCASE` | OAIF Standard | `INVOICE`, `BILL`, `JOURNAL` |
 | `vendor.name.TYPE` | Vendor-specific | `vendor.quickbooks.MEMORIZED_TXN` |
 | `ext.name.TYPE` | Proposed extension | `ext.crypto.WALLET_TRANSFER` |
+
+Standard type names (UPPERCASE) are defined by this specification. Vendor-specific types use the `vendor.` prefix to avoid collisions. Community-proposed extensions use `ext.` until promoted to standard.
 
 ### 2.3 Self-Describing Files
 
@@ -142,14 +180,16 @@ Every record includes a `source_raw` TEXT field containing the original data as 
 **Readers MUST:**
 - Read `oaif_metadata` first
 - Check `oaif_min_reader` version
-- Look up type names from embedded tables
+- Look up type names from embedded tables (see Section 2.1)
 - Handle unknown types gracefully (don't crash)
 - Ignore unknown tables/columns
+- Preserve unknown data when round-tripping
 
 **Writers MUST:**
 - Include all required metadata
 - Populate all reference tables used
 - Maintain double-entry integrity
+- Use standard type NAMES where they exist
 
 ---
 
@@ -166,6 +206,8 @@ CREATE TABLE [name]_type (
     metadata TEXT
 );
 ```
+
+The `name` field is the canonical identifier. The `id` field is for efficient foreign key joins within the file. See Section 2.1 for the critical distinction.
 
 ### 3.1 Account Types
 
@@ -312,47 +354,49 @@ CREATE TABLE [name]_type (
 | `BILLABLE_TIME` | Time entry for billing |
 | `BILLABLE_EXPENSE` | Expense for rebilling |
 
-## 3.3 Attachments
+### 3.3 Attachments
 
-OAIF v1.1 adds support for document attachments linked to transactions.
+OAIF supports document attachments linked to any record via the `parent_table`/`parent_id` pattern.
 
-### Purpose
+#### Purpose
 
 Store receipts, contracts, and supporting documents directly in the OAIF file. This ensures complete data portability - when migrating between accounting systems, users keep their supporting documentation.
 
-### Schema
+#### Schema
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| attachment_id | INTEGER | Auto | Primary key |
-| txn_id | INTEGER | No | Link to transaction (NULL for standalone) |
+| id | INTEGER | Auto | Primary key |
+| parent_table | TEXT | **Yes** | Table name (e.g., 'txn_header', 'customer') |
+| parent_id | INTEGER | **Yes** | Record ID in parent table |
 | filename | TEXT | **Yes** | Original filename with extension |
 | mime_type | TEXT | No | MIME type (e.g., 'application/pdf') |
 | file_size | INTEGER | No | Size in bytes |
-| file_data | BLOB | * | Binary file data (embedded) |
-| external_path | TEXT | * | Local filesystem path |
-| external_url | TEXT | * | Cloud storage URL |
 | checksum | TEXT | No | SHA-256 hash for verification |
+| storage_type | TEXT | **Yes** | 'embedded', 'external', or 'url' |
+| data | BLOB | * | Binary file data (if embedded) |
+| external_path | TEXT | * | Local filesystem path (if external) |
+| external_url | TEXT | * | Cloud storage URL (if url) |
+| document_date | DATE | No | Document date (may differ from upload) |
 | description | TEXT | No | User-provided description |
-| document_date | TEXT | No | Document date (may differ from upload) |
-| uploaded_at | TEXT | Auto | When attachment was added |
+| created_at | TIMESTAMP | No | When attachment was added |
 | source_id | TEXT | No | ID from source system |
 | source_system | TEXT | No | Name of source system |
 | source_raw | TEXT | No | Original metadata as JSON |
 
-\* One of file_data, external_path, or external_url should be populated.
+\* One of data, external_path, or external_url should be populated based on storage_type.
 
-### Storage Modes
+#### Storage Modes
 
 | Mode | Field | Portable? | Use Case |
 |------|-------|-----------|----------|
-| **Embedded** | file_data | ✅ Yes | Default - complete portability |
-| **Local** | external_path | ❌ No | Large files, temporary |
-| **Cloud** | external_url | ⚠️ Depends | Cloud-native systems |
+| **embedded** | data | âœ… Yes | Default - complete portability |
+| **external** | external_path | âŒ No | Large files, temporary |
+| **url** | external_url | âš ï¸ Depends | Cloud-native systems |
 
-**Recommendation:** Embedded storage is strongly preferred for interchange.
+**Recommendation:** Embedded storage (`storage_type='embedded'`) is strongly preferred for interchange.
 
-### Size Guidelines
+#### Size Guidelines
 
 - Individual file: 10 MB recommended max
 - Total per transaction: 25 MB recommended max
@@ -430,29 +474,29 @@ Store receipts, contracts, and supporting documents directly in the OAIF file. T
 
 ```
 OAIF Database Structure
-├── oaif_metadata          -- REQUIRED: Self-describing
-├── Reference Tables
-│   ├── account_type
-│   ├── transaction_type  
-│   ├── item_type
-│   ├── entity_type
-│   ├── tax_type
-│   └── security_type
-├── Master Data
-│   ├── currency
-│   ├── account
-│   ├── customer
-│   ├── vendor
-│   ├── employee
-│   ├── item
-│   ├── tax_code
-│   └── terms
-├── Transactions
-│   ├── txn_header
-│   ├── txn_line
-│   └── txn_link
-└── Extensions
-    └── extension_data     -- Catch-all for custom fields
+â”œâ”€â”€ oaif_metadata          -- REQUIRED: Self-describing
+â”œâ”€â”€ Reference Tables
+â”‚   â”œâ”€â”€ account_type
+â”‚   â”œâ”€â”€ transaction_type  
+â”‚   â”œâ”€â”€ item_type
+â”‚   â”œâ”€â”€ entity_type
+â”‚   â”œâ”€â”€ tax_type
+â”‚   â””â”€â”€ security_type
+â”œâ”€â”€ Master Data
+â”‚   â”œâ”€â”€ currency
+â”‚   â”œâ”€â”€ account
+â”‚   â”œâ”€â”€ customer
+â”‚   â”œâ”€â”€ vendor
+â”‚   â”œâ”€â”€ employee
+â”‚   â”œâ”€â”€ item
+â”‚   â”œâ”€â”€ tax_code
+â”‚   â””â”€â”€ terms
+â”œâ”€â”€ Transactions
+â”‚   â”œâ”€â”€ txn_header
+â”‚   â”œâ”€â”€ txn_line
+â”‚   â””â”€â”€ txn_link
+â””â”€â”€ Extensions
+    â””â”€â”€ extension_data     -- Catch-all for custom fields
 ```
 
 ### 4.2 oaif_metadata (Required)
@@ -487,7 +531,7 @@ CREATE TABLE oaif_metadata (
 CREATE TABLE currency (
     code TEXT PRIMARY KEY,          -- ISO 4217: USD, EUR, GBP
     name TEXT NOT NULL,
-    symbol TEXT,                    -- $, €, £
+    symbol TEXT,                    -- $, â‚¬, Â£
     decimal_places INTEGER NOT NULL DEFAULT 2,
     is_active INTEGER DEFAULT 1
 );
@@ -539,9 +583,21 @@ CREATE TABLE customer (
     fax TEXT,
     website TEXT,
     
-    -- Addresses (JSON for flexibility)
-    billing_address TEXT,           -- JSON
-    shipping_address TEXT,          -- JSON
+    -- Addresses (inline fields)
+    billing_address_line1 TEXT,
+    billing_address_line2 TEXT,
+    billing_address_line3 TEXT,
+    billing_city TEXT,
+    billing_region TEXT,
+    billing_postal_code TEXT,
+    billing_country TEXT,
+    shipping_address_line1 TEXT,
+    shipping_address_line2 TEXT,
+    shipping_address_line3 TEXT,
+    shipping_city TEXT,
+    shipping_region TEXT,
+    shipping_postal_code TEXT,
+    shipping_country TEXT,
     
     -- Financial
     currency_code TEXT REFERENCES currency(code),
@@ -587,8 +643,14 @@ CREATE TABLE vendor (
     fax TEXT,
     website TEXT,
     
-    -- Address
-    address TEXT,                   -- JSON
+    -- Address (inline fields)
+    address_line1 TEXT,
+    address_line2 TEXT,
+    address_line3 TEXT,
+    city TEXT,
+    region TEXT,
+    postal_code TEXT,
+    country TEXT,
     
     -- Financial
     currency_code TEXT REFERENCES currency(code),
@@ -628,7 +690,12 @@ CREATE TABLE employee (
     email TEXT,
     phone TEXT,
     mobile TEXT,
-    address TEXT,                   -- JSON
+    address_line1 TEXT,
+    address_line2 TEXT,
+    city TEXT,
+    region TEXT,
+    postal_code TEXT,
+    country TEXT,
     
     -- Employment
     employee_number TEXT,
@@ -806,9 +873,21 @@ CREATE TABLE txn_header (
     terms_id INTEGER REFERENCES terms(id),
     tax_code_id INTEGER REFERENCES tax_code(id),
     
-    -- Addresses (JSON for flexibility)
-    billing_address TEXT,
-    shipping_address TEXT,
+    -- Addresses (inline fields)
+    billing_address_line1 TEXT,
+    billing_address_line2 TEXT,
+    billing_address_line3 TEXT,
+    billing_city TEXT,
+    billing_region TEXT,
+    billing_postal_code TEXT,
+    billing_country TEXT,
+    shipping_address_line1 TEXT,
+    shipping_address_line2 TEXT,
+    shipping_address_line3 TEXT,
+    shipping_city TEXT,
+    shipping_region TEXT,
+    shipping_postal_code TEXT,
+    shipping_country TEXT,
     
     -- Memo & Notes
     memo TEXT,
@@ -854,6 +933,11 @@ CREATE TABLE txn_line (
     customer_id INTEGER REFERENCES customer(id),
     is_billable INTEGER DEFAULT 0,
     is_billed INTEGER DEFAULT 0,
+    
+    -- Classifications
+    class_id INTEGER REFERENCES class(id),
+    location_id INTEGER REFERENCES location(id),
+    project_id INTEGER REFERENCES project(id),
     
     -- Investment transactions
     security_id INTEGER REFERENCES security(id),
@@ -925,7 +1009,12 @@ CREATE TABLE location (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
     code TEXT,
-    address TEXT,                   -- JSON
+    address_line1 TEXT,
+    address_line2 TEXT,
+    city TEXT,
+    region TEXT,
+    postal_code TEXT,
+    country TEXT,
     parent_id INTEGER REFERENCES location(id),
     is_active INTEGER DEFAULT 1,
     source_id TEXT,
@@ -945,23 +1034,6 @@ CREATE TABLE project (
     is_active INTEGER DEFAULT 1,
     source_id TEXT,
     source_raw TEXT
-);
-
--- Link transactions to classifications (many-to-many)
-CREATE TABLE txn_dimension (
-    txn_header_id INTEGER NOT NULL REFERENCES txn_header(id),
-    class_id INTEGER REFERENCES class(id),
-    location_id INTEGER REFERENCES location(id),
-    project_id INTEGER REFERENCES project(id),
-    PRIMARY KEY (txn_header_id)
-);
-
-CREATE TABLE txn_line_dimension (
-    txn_line_id INTEGER NOT NULL REFERENCES txn_line(id),
-    class_id INTEGER REFERENCES class(id),
-    location_id INTEGER REFERENCES location(id),
-    project_id INTEGER REFERENCES project(id),
-    PRIMARY KEY (txn_line_id)
 );
 ```
 
@@ -1043,36 +1115,24 @@ CREATE TABLE time_entry (
 );
 ```
 
-### 5.4 Attachments
-
-```sql
-CREATE TABLE attachment (
-    id INTEGER PRIMARY KEY,
-    parent_table TEXT NOT NULL,
-    parent_id INTEGER NOT NULL,
-    filename TEXT NOT NULL,
-    mime_type TEXT,
-    description TEXT,
-    file_size INTEGER,
-    checksum TEXT,                  -- SHA-256
-    storage_type TEXT NOT NULL,     -- 'embedded', 'external', 'url'
-    data BLOB,                      -- If embedded
-    external_path TEXT,             -- If external
-    external_url TEXT,              -- If URL
-    created_at TIMESTAMP,
-    source_raw TEXT
-);
-```
-
-### 5.5 Budgets
+### 5.4 Budgets
 
 ```sql
 CREATE TABLE budget (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
     fiscal_year INTEGER NOT NULL,
+    budget_type TEXT DEFAULT 'STANDARD',
+    is_active INTEGER DEFAULT 1,
+    source_raw TEXT
+);
+
+CREATE TABLE budget_detail (
+    id INTEGER PRIMARY KEY,
+    budget_id INTEGER NOT NULL REFERENCES budget(id),
     account_id INTEGER NOT NULL REFERENCES account(id),
-    period_type TEXT,               -- 'MONTHLY', 'QUARTERLY', 'YEARLY'
+    customer_id INTEGER REFERENCES customer(id),
+    class_id INTEGER REFERENCES class(id),
     period_1 DECIMAL(19,6),
     period_2 DECIMAL(19,6),
     period_3 DECIMAL(19,6),
@@ -1085,20 +1145,20 @@ CREATE TABLE budget (
     period_10 DECIMAL(19,6),
     period_11 DECIMAL(19,6),
     period_12 DECIMAL(19,6),
-    class_id INTEGER REFERENCES class(id),
-    customer_id INTEGER REFERENCES customer(id),
+    total DECIMAL(19,6),
     source_raw TEXT
 );
 ```
 
-### 5.6 Bank Reconciliations
+### 5.5 Bank Reconciliations
 
 ```sql
 CREATE TABLE bank_reconciliation (
     id INTEGER PRIMARY KEY,
     account_id INTEGER NOT NULL REFERENCES account(id),
     statement_date DATE NOT NULL,
-    statement_balance DECIMAL(19,6) NOT NULL,
+    statement_ending_balance DECIMAL(19,6) NOT NULL,
+    statement_beginning_balance DECIMAL(19,6),
     cleared_balance DECIMAL(19,6),
     difference DECIMAL(19,6),
     is_reconciled INTEGER DEFAULT 0,
@@ -1163,13 +1223,14 @@ PRAGMA user_version = 1;  -- Schema version 1.0
 | oaif_version | user_version | Changes |
 |--------------|--------------|---------|
 | 1.0 | 1 | Initial release |
-| 1.1 | 2 | (future) New standard types |
+| 1.1 | 1 | Added attachment table |
+| 1.2 | 1 | Renamed state→region, ID independence docs |
 | 2.0 | 10 | (future) Breaking changes |
 
 ### 7.3 Extension Lifecycle
 
 ```
-Vendor Extension → Proposed Extension → Standard
+Vendor Extension â†’ Proposed Extension â†’ Standard
 vendor.foo.TYPE      ext.community.TYPE     TYPE
 ```
 
@@ -1233,7 +1294,7 @@ See accompanying file: `oaif_schema.sql`
 
 ## Appendix B: Platform Mapping Tables
 
-See accompanying file: `oaif_platform_mappings.md`
+See accompanying file: `PLATFORM_MAPPINGS.md`
 
 ## Appendix C: Example Code
 
@@ -1241,7 +1302,6 @@ See accompanying file: `oaif_platform_mappings.md`
 
 ```python
 import sqlite3
-import json
 from datetime import datetime
 
 def create_oaif_file(filepath, company_name, source_system):
@@ -1293,11 +1353,31 @@ def read_oaif_file(filepath):
         raise ValueError(f'File requires reader version {min_reader}')
     
     # Build type lookup from embedded tables (never hardcode!)
-    txn_types = dict(conn.execute(
-        'SELECT id, name FROM transaction_type'
-    ).fetchall())
+    txn_types = {}
+    for row in conn.execute('SELECT id, name FROM transaction_type'):
+        txn_types[row[0]] = row[1]  # id -> name
+        txn_types[row[1]] = row[0]  # name -> id
     
     return conn, metadata, txn_types
+```
+
+### Querying by type name (correct pattern)
+
+```python
+def get_invoices(conn, txn_types):
+    """Get all invoices using name-based lookup."""
+    invoice_id = txn_types.get('INVOICE')
+    if invoice_id is None:
+        return []  # This file has no INVOICE type defined
+    
+    return conn.execute('''
+        SELECT h.*, c.name as customer_name
+        FROM txn_header h
+        LEFT JOIN customer c ON h.customer_id = c.id
+        WHERE h.txn_type_id = ?
+        AND h.is_voided = 0
+        ORDER BY h.txn_date DESC
+    ''', (invoice_id,)).fetchall()
 ```
 
 ---
@@ -1312,7 +1392,9 @@ def read_oaif_file(filepath):
 
 | Version | Date | Changes |
 |---------|------|---------|
-| 1.0 | 2026-01 | Initial specification |
+| 1.0 | 2026-01-12 | Initial specification |
+| 1.1 | 2026-01-15 | Added attachment table |
+| 1.2 | 2026-01-16 | Renamed state→region for international compatibility; added ID independence documentation; fixed attachment table to use parent_table/parent_id pattern |
 
 ---
 
