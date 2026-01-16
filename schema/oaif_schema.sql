@@ -1,6 +1,6 @@
 -- ============================================================================
 -- Open Accounting Interchange Format (OAIF) Schema
--- Version: 1.0
+-- Version: 1.2
 -- ============================================================================
 
 -- File Identification
@@ -20,6 +20,12 @@ CREATE TABLE oaif_metadata (
 
 -- ============================================================================
 -- REFERENCE TABLES (Type Lookups)
+-- ============================================================================
+-- IMPORTANT: The NAME field is the canonical identifier for all types.
+-- The ID field is a file-local convenience for foreign key joins.
+-- Readers MUST look up types by NAME from these tables, never hardcode IDs.
+-- Writers SHOULD use the reference IDs below for interoperability, but
+-- readers MUST NOT depend on specific ID-to-name mappings.
 -- ============================================================================
 
 CREATE TABLE account_type (
@@ -138,14 +144,14 @@ CREATE TABLE customer (
     billing_address_line2 TEXT,
     billing_address_line3 TEXT,
     billing_city TEXT,
-    billing_state TEXT,
+    billing_region TEXT,
     billing_postal_code TEXT,
     billing_country TEXT,
     shipping_address_line1 TEXT,
     shipping_address_line2 TEXT,
     shipping_address_line3 TEXT,
     shipping_city TEXT,
-    shipping_state TEXT,
+    shipping_region TEXT,
     shipping_postal_code TEXT,
     shipping_country TEXT,
     currency_code TEXT REFERENCES currency(code),
@@ -190,7 +196,7 @@ CREATE TABLE vendor (
     address_line2 TEXT,
     address_line3 TEXT,
     city TEXT,
-    state TEXT,
+    region TEXT,
     postal_code TEXT,
     country TEXT,
     currency_code TEXT REFERENCES currency(code),
@@ -224,7 +230,7 @@ CREATE TABLE employee (
     address_line1 TEXT,
     address_line2 TEXT,
     city TEXT,
-    state TEXT,
+    region TEXT,
     postal_code TEXT,
     country TEXT,
     employee_number TEXT,
@@ -404,14 +410,14 @@ CREATE TABLE txn_header (
     billing_address_line2 TEXT,
     billing_address_line3 TEXT,
     billing_city TEXT,
-    billing_state TEXT,
+    billing_region TEXT,
     billing_postal_code TEXT,
     billing_country TEXT,
     shipping_address_line1 TEXT,
     shipping_address_line2 TEXT,
     shipping_address_line3 TEXT,
     shipping_city TEXT,
-    shipping_state TEXT,
+    shipping_region TEXT,
     shipping_postal_code TEXT,
     shipping_country TEXT,
     memo TEXT,
@@ -505,7 +511,7 @@ CREATE TABLE location (
     address_line1 TEXT,
     address_line2 TEXT,
     city TEXT,
-    state TEXT,
+    region TEXT,
     postal_code TEXT,
     country TEXT,
     parent_id INTEGER REFERENCES location(id),
@@ -766,6 +772,8 @@ CREATE TABLE budget_detail (
 -- ============================================================================
 -- ATTACHMENT TABLE
 -- ============================================================================
+-- Stores document attachments (receipts, contracts, supporting docs) linked
+-- to any record via parent_table/parent_id pattern.
 
 CREATE TABLE attachment (
     id INTEGER PRIMARY KEY,
@@ -777,12 +785,15 @@ CREATE TABLE attachment (
     description TEXT,
     file_size INTEGER,
     checksum TEXT,
-    storage_type TEXT NOT NULL DEFAULT 'external',
+    storage_type TEXT NOT NULL DEFAULT 'embedded',
     data BLOB,
     external_path TEXT,
     external_url TEXT,
+    document_date DATE,
     created_at TIMESTAMP,
     created_by TEXT,
+    source_id TEXT,
+    source_system TEXT,
     source_raw TEXT
 );
 
@@ -854,6 +865,9 @@ CREATE INDEX idx_txn_line_item ON txn_line(item_id);
 CREATE INDEX idx_txn_link_from ON txn_link(from_txn_id);
 CREATE INDEX idx_txn_link_to ON txn_link(to_txn_id);
 
+CREATE INDEX idx_attachment_parent ON attachment(parent_table, parent_id);
+CREATE INDEX idx_attachment_date ON attachment(document_date);
+
 CREATE INDEX idx_extension_parent ON extension_data(parent_table, parent_id);
 CREATE INDEX idx_extension_namespace ON extension_data(namespace);
 
@@ -869,6 +883,12 @@ CREATE INDEX idx_time_project ON time_entry(project_id);
 
 -- ============================================================================
 -- STANDARD REFERENCE DATA POPULATION
+-- ============================================================================
+-- NOTE: These INSERT statements provide REFERENCE ID assignments for
+-- interoperability between converters. The NAME field is canonical.
+-- Readers MUST look up types by NAME, MUST NOT hardcode ID assumptions.
+-- Writers SHOULD use these IDs for consistency but MAY use different IDs
+-- as long as the NAME is correct in the type table.
 -- ============================================================================
 
 -- Account Types
@@ -899,6 +919,7 @@ INSERT INTO account_type (id, name, description, normal_balance, category) VALUE
 (24, 'NON_POSTING', 'Non-posting/memo accounts', 'N/A', 'OTHER');
 
 -- Transaction Types (comprehensive list)
+-- Categories: SALES, RECEIPT, PURCHASE, PAYMENT, BANK, JOURNAL, PAYROLL, INVENTORY, ASSET, INVEST, TAX, OTHER
 INSERT INTO transaction_type (id, name, description, category, affects_ar, affects_ap, affects_inventory) VALUES
 -- Sales
 (1, 'ESTIMATE', 'Sales quote/estimate', 'SALES', 0, 0, 0),
@@ -1151,63 +1172,11 @@ WHERE il.shares_remaining > 0
 GROUP BY a.id, a.name, s.symbol, s.name, st.name, s.last_price;
 
 -- ============================================================================
--- ATTACHMENT TABLE (OAIF v1.1)
--- ============================================================================
--- Stores document attachments (receipts, contracts, supporting docs) linked
--- to transactions. Enables complete data portability during system migration.
-
-CREATE TABLE attachment (
-    attachment_id INTEGER PRIMARY KEY,
-    
-    -- Link to transaction (optional - could be standalone document)
-    txn_id INTEGER REFERENCES txn_header(txn_id) ON DELETE SET NULL,
-    
-    -- File identification
-    filename TEXT NOT NULL,              -- Original filename
-    mime_type TEXT,                       -- e.g., 'application/pdf', 'image/jpeg'
-    file_size INTEGER,                    -- Size in bytes
-    
-    -- Storage (ONE of these should be populated)
-    file_data BLOB,                       -- Embedded binary data (most portable)
-    external_path TEXT,                   -- Local filesystem path reference
-    external_url TEXT,                    -- Cloud storage URL reference
-    checksum TEXT,                        -- SHA-256 hash for integrity verification
-    
-    -- Metadata
-    description TEXT,                     -- User-provided description
-    document_date TEXT,                   -- Date of the document (may differ from upload)
-    uploaded_at TEXT DEFAULT (datetime('now')),
-    
-    -- Source tracking for imports
-    source_id TEXT,                       -- ID from source system
-    source_system TEXT,                   -- e.g., 'quickbooks', 'xero'
-    source_raw TEXT                       -- Original metadata as JSON
-);
-
-CREATE INDEX idx_attachment_txn ON attachment(txn_id);
-CREATE INDEX idx_attachment_date ON attachment(document_date);
-
--- Validation view: find attachments with storage issues
-CREATE VIEW v_attachment_issues AS
-SELECT 
-    attachment_id,
-    filename,
-    txn_id,
-    CASE
-        WHEN file_data IS NULL AND external_path IS NULL AND external_url IS NULL 
-            THEN 'No storage location'
-        WHEN (file_data IS NOT NULL AND external_path IS NOT NULL)
-            OR (file_data IS NOT NULL AND external_url IS NOT NULL)
-            OR (external_path IS NOT NULL AND external_url IS NOT NULL)
-            THEN 'Multiple storage locations'
-        ELSE 'OK'
-    END as issue
-FROM attachment
-WHERE (file_data IS NULL AND external_path IS NULL AND external_url IS NULL)
-   OR (file_data IS NOT NULL AND external_path IS NOT NULL)
-   OR (file_data IS NOT NULL AND external_url IS NOT NULL)
-   OR (external_path IS NOT NULL AND external_url IS NOT NULL);
-
--- ============================================================================
 -- END OF SCHEMA
 -- ============================================================================
+
+
+
+
+
+
