@@ -5,7 +5,7 @@
 
 -- File Identification
 PRAGMA application_id = 0x4F414946;  -- "OAIF" in ASCII
-PRAGMA user_version = 1;
+PRAGMA user_version = 12;
 PRAGMA foreign_keys = ON;
 PRAGMA encoding = 'UTF-8';
 
@@ -32,8 +32,8 @@ CREATE TABLE account_type (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
     description TEXT,
-    normal_balance TEXT CHECK(normal_balance IN ('DEBIT', 'CREDIT', 'N/A')),
-    category TEXT CHECK(category IN ('ASSET', 'LIABILITY', 'EQUITY', 'INCOME', 'EXPENSE', 'OTHER')),
+    normal_balance TEXT CHECK (normal_balance IN ('DEBIT', 'CREDIT', 'N/A')),
+    category TEXT CHECK (category IN ('ASSET', 'LIABILITY', 'EQUITY', 'INCOME', 'EXPENSE', 'OTHER')),
     is_standard INTEGER DEFAULT 1,
     metadata TEXT
 );
@@ -96,7 +96,7 @@ CREATE TABLE currency (
     code TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     symbol TEXT,
-    decimal_places INTEGER NOT NULL DEFAULT 2,
+    decimal_places INTEGER NOT NULL DEFAULT 2 CHECK (decimal_places >= 0 AND decimal_places <= 18),
     is_active INTEGER DEFAULT 1
 );
 
@@ -157,15 +157,15 @@ CREATE TABLE customer (
     currency_code TEXT REFERENCES currency(code),
     credit_limit DECIMAL(19,6),
     balance DECIMAL(19,6),
-    terms_id INTEGER REFERENCES terms(id),
+    term_id INTEGER REFERENCES term(id),
     tax_code_id INTEGER REFERENCES tax_code(id),
     resale_number TEXT,
-    tax_exempt INTEGER DEFAULT 0,
+    is_tax_exempt INTEGER DEFAULT 0,
     notes TEXT,
     is_active INTEGER DEFAULT 1,
     parent_id INTEGER REFERENCES customer(id),
     price_level TEXT,
-    sales_rep TEXT,
+    sales_rep_id INTEGER REFERENCES sales_rep(id),
     preferred_payment_method TEXT,
     preferred_delivery_method TEXT,
     account_number TEXT,
@@ -201,7 +201,7 @@ CREATE TABLE vendor (
     country TEXT,
     currency_code TEXT REFERENCES currency(code),
     balance DECIMAL(19,6),
-    terms_id INTEGER REFERENCES terms(id),
+    term_id INTEGER REFERENCES term(id),
     tax_id TEXT,
     tax_id_type TEXT,
     is_1099 INTEGER DEFAULT 0,
@@ -254,6 +254,22 @@ CREATE TABLE employee (
     is_active INTEGER DEFAULT 1,
     is_officer INTEGER DEFAULT 0,
     is_owner INTEGER DEFAULT 0,
+    created_at TIMESTAMP,
+    modified_at TIMESTAMP,
+    source_id TEXT,
+    source_raw TEXT
+);
+
+CREATE TABLE sales_rep (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    initials TEXT,
+    employee_id INTEGER REFERENCES employee(id),
+    email TEXT,
+    phone TEXT,
+    mobile TEXT,
+    commission_rate DECIMAL(9,6),
+    is_active INTEGER DEFAULT 1,
     created_at TIMESTAMP,
     modified_at TIMESTAMP,
     source_id TEXT,
@@ -336,14 +352,14 @@ CREATE TABLE tax_code (
     source_raw TEXT
 );
 
-CREATE TABLE terms (
+CREATE TABLE term (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
-    due_days INTEGER,
+    due_days INTEGER CHECK (due_days IS NULL OR due_days >= 0),
     due_day_of_month INTEGER,
-    due_next_month INTEGER DEFAULT 0,
+    is_due_next_month INTEGER DEFAULT 0,
     discount_days INTEGER,
-    discount_percent DECIMAL(9,6),
+    discount_percent DECIMAL(9,6) CHECK (discount_percent IS NULL OR (discount_percent >= 0 AND discount_percent <= 100)),
     is_date_driven INTEGER DEFAULT 0,
     is_active INTEGER DEFAULT 1,
     source_id TEXT,
@@ -365,7 +381,7 @@ CREATE TABLE payment_method (
 
 CREATE TABLE txn_header (
     id INTEGER PRIMARY KEY,
-    txn_type_id INTEGER NOT NULL REFERENCES transaction_type(id),
+    transaction_type_id INTEGER NOT NULL REFERENCES transaction_type(id),
     txn_date DATE NOT NULL,
     doc_number TEXT,
     ref_number TEXT,
@@ -376,7 +392,7 @@ CREATE TABLE txn_header (
     ap_account_id INTEGER REFERENCES account(id),
     ar_account_id INTEGER REFERENCES account(id),
     currency_code TEXT NOT NULL DEFAULT 'USD' REFERENCES currency(code),
-    exchange_rate DECIMAL(19,10) DEFAULT 1,
+    exchange_rate DECIMAL(19,10) DEFAULT 1 CHECK (exchange_rate > 0),
     subtotal DECIMAL(19,6),
     discount_amount DECIMAL(19,6),
     discount_percent DECIMAL(9,6),
@@ -402,10 +418,10 @@ CREATE TABLE txn_header (
     is_emailed INTEGER DEFAULT 0,
     is_to_be_printed INTEGER DEFAULT 0,
     is_to_be_emailed INTEGER DEFAULT 0,
-    terms_id INTEGER REFERENCES terms(id),
+    term_id INTEGER REFERENCES term(id),
     tax_code_id INTEGER REFERENCES tax_code(id),
     payment_method_id INTEGER REFERENCES payment_method(id),
-    sales_rep TEXT,
+    sales_rep_id INTEGER REFERENCES sales_rep(id),
     billing_address_line1 TEXT,
     billing_address_line2 TEXT,
     billing_address_line3 TEXT,
@@ -461,10 +477,10 @@ CREATE TABLE txn_line (
     location_id INTEGER REFERENCES location(id),
     project_id INTEGER REFERENCES project(id),
     security_id INTEGER REFERENCES security(id),
-    shares DECIMAL(19,8),
-    price_per_share DECIMAL(19,8),
+    shares DECIMAL(19,9),
+    price_per_share DECIMAL(19,9),
     commission DECIMAL(19,6),
-    lot_id INTEGER REFERENCES investment_lot(id),
+    investment_lot_id INTEGER REFERENCES investment_lot(id),
     service_date DATE,
     lot_number TEXT,
     serial_number TEXT,
@@ -476,10 +492,10 @@ CREATE TABLE txn_line (
 
 CREATE TABLE txn_link (
     id INTEGER PRIMARY KEY,
-    from_txn_id INTEGER NOT NULL REFERENCES txn_header(id),
-    from_line_id INTEGER REFERENCES txn_line(id),
-    to_txn_id INTEGER NOT NULL REFERENCES txn_header(id),
-    to_line_id INTEGER REFERENCES txn_line(id),
+    from_txn_header_id INTEGER NOT NULL REFERENCES txn_header(id),
+    from_txn_line_id INTEGER REFERENCES txn_line(id),
+    to_txn_header_id INTEGER NOT NULL REFERENCES txn_header(id),
+    to_txn_line_id INTEGER REFERENCES txn_line(id),
     link_type TEXT,
     amount DECIMAL(19,6),
     link_date DATE,
@@ -552,7 +568,7 @@ CREATE TABLE security (
     isin TEXT,
     currency_code TEXT REFERENCES currency(code),
     exchange TEXT,
-    last_price DECIMAL(19,8),
+    last_price DECIMAL(19,9),
     last_price_date DATE,
     face_value DECIMAL(19,6),
     coupon_rate DECIMAL(9,6),
@@ -572,11 +588,11 @@ CREATE TABLE security_price (
     id INTEGER PRIMARY KEY,
     security_id INTEGER NOT NULL REFERENCES security(id),
     price_date DATE NOT NULL,
-    price DECIMAL(19,8) NOT NULL,
-    high DECIMAL(19,8),
-    low DECIMAL(19,8),
-    open DECIMAL(19,8),
-    close DECIMAL(19,8),
+    price DECIMAL(19,9) NOT NULL,
+    high DECIMAL(19,9),
+    low DECIMAL(19,9),
+    open DECIMAL(19,9),
+    close DECIMAL(19,9),
     volume DECIMAL(19,2),
     source TEXT,
     UNIQUE(security_id, price_date)
@@ -588,16 +604,16 @@ CREATE TABLE investment_lot (
     security_id INTEGER NOT NULL REFERENCES security(id),
     lot_number TEXT,
     acquisition_date DATE NOT NULL,
-    acquisition_txn_id INTEGER REFERENCES txn_header(id),
-    shares_acquired DECIMAL(19,8) NOT NULL,
-    cost_per_share DECIMAL(19,8) NOT NULL,
+    acquisition_txn_header_id INTEGER REFERENCES txn_header(id),
+    shares_acquired DECIMAL(19,9) NOT NULL,
+    cost_per_share DECIMAL(19,9) NOT NULL,
     total_cost DECIMAL(19,6) NOT NULL,
     commission DECIMAL(19,6),
-    shares_remaining DECIMAL(19,8) NOT NULL,
+    shares_remaining DECIMAL(19,9) NOT NULL,
     adjusted_cost_basis DECIMAL(19,6),
     holding_period TEXT,
     disposal_date DATE,
-    disposal_txn_id INTEGER REFERENCES txn_header(id),
+    disposal_txn_header_id INTEGER REFERENCES txn_header(id),
     proceeds DECIMAL(19,6),
     gain_loss DECIMAL(19,6),
     wash_sale_disallowed DECIMAL(19,6),
@@ -630,8 +646,8 @@ CREATE TABLE time_entry (
     is_billed INTEGER DEFAULT 0,
     is_paid INTEGER DEFAULT 0,
     billable_status TEXT,
-    invoice_id INTEGER REFERENCES txn_header(id),
-    paycheck_id INTEGER REFERENCES txn_header(id),
+    invoice_txn_header_id INTEGER REFERENCES txn_header(id),
+    paycheck_txn_header_id INTEGER REFERENCES txn_header(id),
     approved_by TEXT,
     approved_at TIMESTAMP,
     source_id TEXT,
@@ -680,14 +696,14 @@ CREATE TABLE payroll_line (
 CREATE TABLE recurring_template (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
-    txn_type_id INTEGER NOT NULL REFERENCES transaction_type(id),
+    transaction_type_id INTEGER NOT NULL REFERENCES transaction_type(id),
     frequency TEXT,
     interval_count INTEGER DEFAULT 1,
     start_date DATE,
     end_date DATE,
     next_date DATE,
     remaining_count INTEGER,
-    auto_create INTEGER DEFAULT 0,
+    is_auto_create INTEGER DEFAULT 0,
     days_before_due INTEGER,
     template_data TEXT,
     is_active INTEGER DEFAULT 1,
@@ -832,54 +848,57 @@ CREATE TABLE extension_data (
 -- INDEXES FOR PERFORMANCE
 -- ============================================================================
 
-CREATE INDEX idx_account_type ON account(account_type_id);
-CREATE INDEX idx_account_parent ON account(parent_id);
-CREATE INDEX idx_account_active ON account(is_active);
+CREATE INDEX idx_account_account_type_id ON account(account_type_id);
+CREATE INDEX idx_account_parent_id ON account(parent_id);
+CREATE INDEX idx_account_is_active ON account(is_active);
 
 CREATE INDEX idx_customer_name ON customer(name);
-CREATE INDEX idx_customer_active ON customer(is_active);
-CREATE INDEX idx_customer_parent ON customer(parent_id);
+CREATE INDEX idx_customer_is_active ON customer(is_active);
+CREATE INDEX idx_customer_parent_id ON customer(parent_id);
 
 CREATE INDEX idx_vendor_name ON vendor(name);
-CREATE INDEX idx_vendor_active ON vendor(is_active);
+CREATE INDEX idx_vendor_is_active ON vendor(is_active);
 
 CREATE INDEX idx_employee_name ON employee(name);
-CREATE INDEX idx_employee_active ON employee(is_active);
+CREATE INDEX idx_employee_is_active ON employee(is_active);
 
-CREATE INDEX idx_item_type ON item(item_type_id);
+CREATE INDEX idx_sales_rep_name ON sales_rep(name);
+CREATE INDEX idx_sales_rep_is_active ON sales_rep(is_active);
+
+CREATE INDEX idx_item_item_type_id ON item(item_type_id);
 CREATE INDEX idx_item_name ON item(name);
 CREATE INDEX idx_item_code ON item(code);
-CREATE INDEX idx_item_active ON item(is_active);
+CREATE INDEX idx_item_is_active ON item(is_active);
 
-CREATE INDEX idx_txn_header_type ON txn_header(txn_type_id);
-CREATE INDEX idx_txn_header_date ON txn_header(txn_date);
+CREATE INDEX idx_txn_header_transaction_type_id ON txn_header(transaction_type_id);
+CREATE INDEX idx_txn_header_txn_date ON txn_header(txn_date);
 CREATE INDEX idx_txn_header_doc_number ON txn_header(doc_number);
-CREATE INDEX idx_txn_header_customer ON txn_header(customer_id);
-CREATE INDEX idx_txn_header_vendor ON txn_header(vendor_id);
-CREATE INDEX idx_txn_header_account ON txn_header(account_id);
+CREATE INDEX idx_txn_header_customer_id ON txn_header(customer_id);
+CREATE INDEX idx_txn_header_vendor_id ON txn_header(vendor_id);
+CREATE INDEX idx_txn_header_account_id ON txn_header(account_id);
 
-CREATE INDEX idx_txn_line_header ON txn_line(txn_header_id);
-CREATE INDEX idx_txn_line_account ON txn_line(account_id);
-CREATE INDEX idx_txn_line_item ON txn_line(item_id);
+CREATE INDEX idx_txn_line_txn_header_id ON txn_line(txn_header_id);
+CREATE INDEX idx_txn_line_account_id ON txn_line(account_id);
+CREATE INDEX idx_txn_line_item_id ON txn_line(item_id);
 
-CREATE INDEX idx_txn_link_from ON txn_link(from_txn_id);
-CREATE INDEX idx_txn_link_to ON txn_link(to_txn_id);
+CREATE INDEX idx_txn_link_from_txn_header_id ON txn_link(from_txn_header_id);
+CREATE INDEX idx_txn_link_to_txn_header_id ON txn_link(to_txn_header_id);
 
 CREATE INDEX idx_attachment_parent ON attachment(parent_table, parent_id);
-CREATE INDEX idx_attachment_date ON attachment(document_date);
+CREATE INDEX idx_attachment_document_date ON attachment(document_date);
 
-CREATE INDEX idx_extension_parent ON extension_data(parent_table, parent_id);
-CREATE INDEX idx_extension_namespace ON extension_data(namespace);
+CREATE INDEX idx_extension_data_parent ON extension_data(parent_table, parent_id);
+CREATE INDEX idx_extension_data_namespace ON extension_data(namespace);
 
 CREATE INDEX idx_security_symbol ON security(symbol);
-CREATE INDEX idx_security_type ON security(security_type_id);
+CREATE INDEX idx_security_security_type_id ON security(security_type_id);
 
-CREATE INDEX idx_lot_account ON investment_lot(account_id);
-CREATE INDEX idx_lot_security ON investment_lot(security_id);
+CREATE INDEX idx_investment_lot_account_id ON investment_lot(account_id);
+CREATE INDEX idx_investment_lot_security_id ON investment_lot(security_id);
 
-CREATE INDEX idx_time_employee ON time_entry(employee_id);
-CREATE INDEX idx_time_date ON time_entry(entry_date);
-CREATE INDEX idx_time_project ON time_entry(project_id);
+CREATE INDEX idx_time_entry_employee_id ON time_entry(employee_id);
+CREATE INDEX idx_time_entry_entry_date ON time_entry(entry_date);
+CREATE INDEX idx_time_entry_project_id ON time_entry(project_id);
 
 -- ============================================================================
 -- STANDARD REFERENCE DATA POPULATION
@@ -1075,8 +1094,12 @@ INSERT INTO currency (code, name, symbol, decimal_places) VALUES
 ('ZAR', 'South African Rand', 'R', 2),
 ('SGD', 'Singapore Dollar', 'S$', 2),
 ('HKD', 'Hong Kong Dollar', 'HK$', 2),
-('BTC', 'Bitcoin', '₿', 8),
-('ETH', 'Ethereum', 'Ξ', 8);
+('KRW', 'South Korean Won', '₩', 0),
+('SEK', 'Swedish Krona', 'kr', 2),
+('NOK', 'Norwegian Krone', 'kr', 2),
+('DKK', 'Danish Krone', 'kr', 2),
+('BTC', 'Bitcoin', '₿', 9),
+('ETH', 'Ethereum', 'Ξ', 9);
 
 -- Common Payment Methods
 INSERT INTO payment_method (id, name, payment_type) VALUES
@@ -1122,7 +1145,7 @@ SELECT
     COALESCE(SUM(CASE WHEN tt.name = 'RECEIPT' THEN th.total_amount ELSE 0 END), 0) AS balance
 FROM customer c
 LEFT JOIN txn_header th ON c.id = th.customer_id AND th.is_posted = 1 AND th.is_voided = 0
-LEFT JOIN transaction_type tt ON th.txn_type_id = tt.id
+LEFT JOIN transaction_type tt ON th.transaction_type_id = tt.id
 GROUP BY c.id, c.name;
 
 CREATE VIEW v_vendor_balance AS
@@ -1133,7 +1156,7 @@ SELECT
     COALESCE(SUM(CASE WHEN tt.name = 'PAYMENT' THEN th.total_amount ELSE 0 END), 0) AS balance
 FROM vendor v
 LEFT JOIN txn_header th ON v.id = th.vendor_id AND th.is_posted = 1 AND th.is_voided = 0
-LEFT JOIN transaction_type tt ON th.txn_type_id = tt.id
+LEFT JOIN transaction_type tt ON th.transaction_type_id = tt.id
 GROUP BY v.id, v.name;
 
 CREATE VIEW v_inventory_status AS
@@ -1174,9 +1197,3 @@ GROUP BY a.id, a.name, s.symbol, s.name, st.name, s.last_price;
 -- ============================================================================
 -- END OF SCHEMA
 -- ============================================================================
-
-
-
-
-
-
