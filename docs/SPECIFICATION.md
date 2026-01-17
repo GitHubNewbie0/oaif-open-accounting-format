@@ -122,7 +122,7 @@ for row in conn.execute('SELECT id, name FROM transaction_type'):
 invoice_type_id = txn_types.get('INVOICE')
 if invoice_type_id:
     invoices = conn.execute(
-        'SELECT * FROM txn_header WHERE txn_type_id = ?', 
+        'SELECT * FROM txn_header WHERE transaction_type_id = ?', 
         (invoice_type_id,)
     ).fetchall()
 ```
@@ -132,7 +132,7 @@ if invoice_type_id:
 ```python
 # WRONG - hardcoded ID assumption
 invoices = conn.execute(
-    'SELECT * FROM txn_header WHERE txn_type_id = 3'  # Assumes INVOICE=3
+    'SELECT * FROM txn_header WHERE transaction_type_id = 3'  # Assumes INVOICE=3
 ).fetchall()
 ```
 
@@ -288,13 +288,15 @@ The `name` field is the canonical identifier. The `id` field is for efficient fo
 | `CC_CREDIT` | CC Credit | Receipt | - | Credit card refund |
 | `TRANSFER` | Transfer | Inter Account Transfer | Transfer | Between accounts |
 | `EXPENSE` | - | (via Payment) | Spend | Direct expense |
+| `BANK_FEE` | Service Charge | Bank Fee | - | Bank service charge |
+| `INTEREST_INCOME` | - | Interest Income | - | Interest earned |
 
 #### General & Adjustments
 
 | Name | QB | Manager | Xero | Description |
 |------|----|---------|----- |-------------|
 | `JOURNAL` | General Journal | Journal Entry | ManualJournal | Manual GL entry |
-| `OPENING_BALANCE` | - | Journal Entry | - | Opening balances |
+| `OPENING_BALANCE` | Starting Balance | Journal Entry | - | Opening balances |
 | `YEAR_END_CLOSE` | - | Journal Entry | - | Period close |
 
 #### Payroll Transactions
@@ -310,7 +312,7 @@ The `name` field is the canonical identifier. The `id` field is for efficient fo
 | Name | QB | Manager | Xero | Description |
 |------|----|---------|----- |-------------|
 | `INVENTORY_ADJUSTMENT` | Inventory Adjust | Inventory Write-off | - | Qty/value change |
-| `INVENTORY_TRANSFER` | - | Inventory Transfer | - | Between locations |
+| `INVENTORY_TRANSFER` | Inventory Transfer | Inventory Transfer | - | Between locations |
 | `PRODUCTION_ORDER` | Build Assembly | Production Order | - | Manufacturing |
 
 #### Asset Transactions
@@ -347,12 +349,12 @@ The `name` field is the canonical identifier. The `id` field is for efficient fo
 
 #### Other
 
-| Name | Description |
-|------|-------------|
-| `BANK_RECONCILIATION` | Reconciliation record |
-| `EXPENSE_CLAIM` | Employee reimbursement |
-| `BILLABLE_TIME` | Time entry for billing |
-| `BILLABLE_EXPENSE` | Expense for rebilling |
+| Name | QB | Manager | Xero | Description |
+|------|----|---------|----- |-------------|
+| `BANK_RECONCILIATION` | - | - | - | Reconciliation record |
+| `EXPENSE_CLAIM` | - | Expense Claim | - | Employee reimbursement |
+| `BILLABLE_TIME` | Time Tracking | Time Entry | - | Time entry for billing |
+| `BILLABLE_EXPENSE` | Mileage/Expense | Billable Expense | - | Expense for rebilling |
 
 ### 3.3 Attachments
 
@@ -470,7 +472,7 @@ Store receipts, contracts, and supporting documents directly in the OAIF file. T
 
 ## Part 4: Core Tables
 
-### 4.1 Required Tables (~18 core)
+### 4.1 Required Tables (~19 core)
 
 ```
 OAIF Database Structure
@@ -605,10 +607,10 @@ CREATE TABLE customer (
     balance DECIMAL(19,6),
     
     -- Terms & Tax
-    terms_id INTEGER REFERENCES terms(id),
+    term_id INTEGER REFERENCES term(id),
     tax_code_id INTEGER REFERENCES tax_code(id),
     resale_number TEXT,
-    tax_exempt INTEGER DEFAULT 0,
+    is_tax_exempt INTEGER DEFAULT 0,
     
     -- Status
     is_active INTEGER DEFAULT 1,
@@ -657,7 +659,7 @@ CREATE TABLE vendor (
     balance DECIMAL(19,6),
     
     -- Terms & Tax
-    terms_id INTEGER REFERENCES terms(id),
+    term_id INTEGER REFERENCES term(id),
     tax_id TEXT,                    -- Vendor's tax ID
     tax_id_type TEXT,               -- 'EIN', 'VAT', 'GST'
     is_1099 INTEGER DEFAULT 0,
@@ -722,7 +724,29 @@ CREATE TABLE employee (
 );
 ```
 
-### 4.8 item
+### 4.8 sales_rep
+
+```sql
+CREATE TABLE sales_rep (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    initials TEXT,
+    employee_id INTEGER REFERENCES employee(id),
+    email TEXT,
+    phone TEXT,
+    mobile TEXT,
+    commission_rate DECIMAL(9,6),
+    is_active INTEGER DEFAULT 1,
+    created_at TIMESTAMP,
+    modified_at TIMESTAMP,
+    source_id TEXT,
+    source_raw TEXT
+);
+```
+
+Referenced by `customer.sales_rep_id` and `txn_header.sales_rep_id` to track which salesperson is assigned to customers and transactions.
+
+### 4.9 item
 
 ```sql
 CREATE TABLE item (
@@ -777,7 +801,7 @@ CREATE TABLE item (
 );
 ```
 
-### 4.9 tax_code
+### 4.10 tax_code
 
 ```sql
 CREATE TABLE tax_code (
@@ -810,10 +834,10 @@ CREATE TABLE tax_code (
 );
 ```
 
-### 4.10 terms
+### 4.11 term
 
 ```sql
-CREATE TABLE terms (
+CREATE TABLE term (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
     due_days INTEGER,
@@ -825,12 +849,12 @@ CREATE TABLE terms (
 );
 ```
 
-### 4.11 txn_header
+### 4.12 txn_header
 
 ```sql
 CREATE TABLE txn_header (
     id INTEGER PRIMARY KEY,
-    txn_type_id INTEGER NOT NULL REFERENCES transaction_type(id),
+    transaction_type_id INTEGER NOT NULL REFERENCES transaction_type(id),
     txn_date DATE NOT NULL,
     
     -- Reference numbers
@@ -870,7 +894,7 @@ CREATE TABLE txn_header (
     is_cleared INTEGER DEFAULT 0,
     
     -- Terms & Tax
-    terms_id INTEGER REFERENCES terms(id),
+    term_id INTEGER REFERENCES term(id),
     tax_code_id INTEGER REFERENCES tax_code(id),
     
     -- Addresses (inline fields)
@@ -903,7 +927,7 @@ CREATE TABLE txn_header (
 );
 ```
 
-### 4.12 txn_line
+### 4.13 txn_line
 
 ```sql
 CREATE TABLE txn_line (
@@ -941,9 +965,9 @@ CREATE TABLE txn_line (
     
     -- Investment transactions
     security_id INTEGER REFERENCES security(id),
-    shares DECIMAL(19,8),
-    price_per_share DECIMAL(19,8),
-    lot_id INTEGER REFERENCES investment_lot(id),
+    shares DECIMAL(19,9),
+    price_per_share DECIMAL(19,9),
+    investment_lot_id INTEGER REFERENCES investment_lot(id),
     
     -- Service date (for time-based billing)
     service_date DATE,
@@ -954,22 +978,22 @@ CREATE TABLE txn_line (
 );
 ```
 
-### 4.13 txn_link
+### 4.14 txn_link
 
 Links related transactions (payment to invoice, receipt to bill, etc.)
 
 ```sql
 CREATE TABLE txn_link (
     id INTEGER PRIMARY KEY,
-    from_txn_id INTEGER NOT NULL REFERENCES txn_header(id),
-    to_txn_id INTEGER NOT NULL REFERENCES txn_header(id),
+    from_txn_header_id INTEGER NOT NULL REFERENCES txn_header(id),
+    to_txn_header_id INTEGER NOT NULL REFERENCES txn_header(id),
     link_type TEXT,                 -- 'payment', 'receipt', 'fulfillment'
     amount DECIMAL(19,6),           -- Amount applied
     source_raw TEXT
 );
 ```
 
-### 4.14 extension_data
+### 4.15 extension_data
 
 Catch-all for custom fields and vendor-specific data:
 
@@ -1050,7 +1074,7 @@ CREATE TABLE security (
     currency_code TEXT REFERENCES currency(code),
     
     -- Current pricing
-    last_price DECIMAL(19,8),
+    last_price DECIMAL(19,9),
     last_price_date DATE,
     
     -- For bonds
@@ -1073,7 +1097,7 @@ CREATE TABLE security_price (
     id INTEGER PRIMARY KEY,
     security_id INTEGER NOT NULL REFERENCES security(id),
     price_date DATE NOT NULL,
-    price DECIMAL(19,8) NOT NULL,
+    price DECIMAL(19,9) NOT NULL,
     source TEXT,
     UNIQUE(security_id, price_date)
 );
@@ -1083,13 +1107,13 @@ CREATE TABLE investment_lot (
     account_id INTEGER NOT NULL REFERENCES account(id),
     security_id INTEGER NOT NULL REFERENCES security(id),
     acquisition_date DATE NOT NULL,
-    acquisition_txn_id INTEGER REFERENCES txn_header(id),
-    shares_acquired DECIMAL(19,8) NOT NULL,
-    cost_per_share DECIMAL(19,8) NOT NULL,
+    acquisition_txn_header_id INTEGER REFERENCES txn_header(id),
+    shares_acquired DECIMAL(19,9) NOT NULL,
+    cost_per_share DECIMAL(19,9) NOT NULL,
     total_cost DECIMAL(19,6) NOT NULL,
-    shares_remaining DECIMAL(19,8) NOT NULL,
+    shares_remaining DECIMAL(19,9) NOT NULL,
     disposal_date DATE,
-    disposal_txn_id INTEGER REFERENCES txn_header(id),
+    disposal_txn_header_id INTEGER REFERENCES txn_header(id),
     source_raw TEXT
 );
 ```
@@ -1109,7 +1133,7 @@ CREATE TABLE time_entry (
     hourly_rate DECIMAL(19,6),
     is_billable INTEGER DEFAULT 1,
     is_billed INTEGER DEFAULT 0,
-    invoice_id INTEGER REFERENCES txn_header(id),
+    invoice_txn_header_id INTEGER REFERENCES txn_header(id),
     source_id TEXT,
     source_raw TEXT
 );
@@ -1206,7 +1230,7 @@ All monetary amounts use `DECIMAL(19,6)`:
 - 6 decimal places
 - Handles values up to $9,999,999,999,999.999999
 
-Exchange rates and share prices use `DECIMAL(19,8)` or `DECIMAL(19,10)` for additional precision.
+Exchange rates and share prices use `DECIMAL(19,9)` or `DECIMAL(19,10)` for additional precision.
 
 ---
 
@@ -1215,7 +1239,7 @@ Exchange rates and share prices use `DECIMAL(19,8)` or `DECIMAL(19,10)` for addi
 ### 7.1 Schema Versioning
 
 ```sql
-PRAGMA user_version = 1;  -- Schema version 1.0
+PRAGMA user_version = 12;  -- Schema version 1.0
 ```
 
 ### 7.2 Version Compatibility
@@ -1223,8 +1247,8 @@ PRAGMA user_version = 1;  -- Schema version 1.0
 | oaif_version | user_version | Changes |
 |--------------|--------------|---------|
 | 1.0 | 1 | Initial release |
-| 1.1 | 1 | Added attachment table |
-| 1.2 | 1 | Renamed state→region, ID independence docs |
+| 1.2 | 12 | Naming consistency, precision updates |
+| 1.1 | 2 | (future) New standard types |
 | 2.0 | 10 | (future) Breaking changes |
 
 ### 7.3 Extension Lifecycle
@@ -1374,7 +1398,7 @@ def get_invoices(conn, txn_types):
         SELECT h.*, c.name as customer_name
         FROM txn_header h
         LEFT JOIN customer c ON h.customer_id = c.id
-        WHERE h.txn_type_id = ?
+        WHERE h.transaction_type_id = ?
         AND h.is_voided = 0
         ORDER BY h.txn_date DESC
     ''', (invoice_id,)).fetchall()
@@ -1392,9 +1416,8 @@ def get_invoices(conn, txn_types):
 
 | Version | Date | Changes |
 |---------|------|---------|
-| 1.0 | 2026-01-12 | Initial specification |
-| 1.1 | 2026-01-15 | Added attachment table |
-| 1.2 | 2026-01-16 | Renamed state→region for international compatibility; added ID independence documentation; fixed attachment table to use parent_table/parent_id pattern |
+| 1.0 | 2026-01 | Initial specification |
+| 1.2 | 2026-01 | Schema consistency fixes: renamed `terms`→`term`, `txn_type_id`→`transaction_type_id`, standardized FKs; added CHECK constraints; updated precision to DECIMAL(19,9) for shares/prices; added transaction types: BANK_FEE, INTEREST_INCOME; documented QB mappings for OPENING_BALANCE, INVENTORY_TRANSFER, BILLABLE_TIME, BILLABLE_EXPENSE; added `sales_rep` table with FK references from customer and txn_header |
 
 ---
 
