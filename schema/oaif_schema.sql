@@ -1117,6 +1117,16 @@ INSERT INTO payment_method (id, name, payment_type) VALUES
 (12, 'Venmo', 'MOBILE'),
 (13, 'Cryptocurrency', 'CRYPTO');
 
+-- Standard Payment Terms
+INSERT INTO term (id, name, due_days, due_day_of_month, is_date_driven) VALUES
+(1, 'Due on Receipt', 0, NULL, 0),
+(2, 'Due in 5 Days', 5, NULL, 0),
+(3, 'Net 15', 15, NULL, 0),
+(4, 'Net 30', 30, NULL, 0),
+(5, 'Net 45', 45, NULL, 0),
+(6, 'Net 60', 60, NULL, 0),
+(7, 'Due by 5th', NULL, 5, 1);
+
 -- ============================================================================
 -- VIEWS FOR COMMON QUERIES
 -- ============================================================================
