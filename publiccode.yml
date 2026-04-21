@@ -1,0 +1,50 @@
+publiccodeYmlVersion: "0.4"
+
+name: OAIF - Open Accounting Interchange Format
+url: "https://github.com/GitHubNewbie0/oaif-open-accounting-format"
+releaseDate: "2026-04-20"
+softwareVersion: "1.2"
+softwareType: standalone/other
+
+platforms:
+  - web
+  - windows
+  - mac
+  - linux
+
+categories:
+  - accounting
+  - data-exchange
+  - financial-reporting
+
+developmentStatus: stable
+
+description:
+  en:
+    shortDescription: Universal open standard for accounting data interchange
+    longDescription: >
+      OAIF is a vendor-neutral, open file format for complete accounting data.
+      It enables lossless transfer of chart of accounts, customers, vendors,
+      employees, products, transactions, attachments, and more between any
+      accounting systems. Built on SQLite for universal compatibility.
+    features:
+      - SQLite container works everywhere
+      - Double-entry accounting guaranteed
+      - Lossless data preservation
+      - Multi-currency support
+      - Investment and portfolio tracking
+      - Platform mappings for 11 accounting systems
+
+legal:
+  license: Apache-2.0
+
+maintenance:
+  type: community
+  contacts:
+    - name: OAIF Community
+      email: ""
+
+localisation:
+  localisationReady: false
+  availableLanguages:
+    - en
