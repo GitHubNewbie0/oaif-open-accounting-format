@@ -1,0 +1,23 @@
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Python (if running examples)
+__pycache__/
+*.pyc
+*.pyo
+.env
+
+# Node (if running examples)
+node_modules/
+
+# Temporary files
+*.tmp
+*.bak
